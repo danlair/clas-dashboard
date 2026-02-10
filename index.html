@@ -789,6 +789,61 @@
             tbody.innerHTML = '';
             
             metrics.forEach(metric => {
+                // Special handling for CHP - calculate from Fall + Spring terms
+                if (metric === 'CHP') {
+                    const row = document.createElement('tr');
+                    const nameCell = document.createElement('td');
+                    nameCell.className = 'metric-name';
+                    nameCell.textContent = metricLabels[metric] || metric;
+                    row.appendChild(nameCell);
+                    
+                    let hasCHPData = false;
+                    
+                    years.forEach(year => {
+                        const [fallYear, springYear] = year.split('-').map(y => parseInt(y));
+                        const fallTerm = `Fall ${fallYear}`;
+                        const springTerm = `Spring ${springYear}`;
+                        
+                        // Get Fall and Spring CHP values
+                        const fallData = allData.find(d => 
+                            d.Department === currentDept && 
+                            d.Metric === 'CHP' && 
+                            d['Year/Term'] === fallTerm
+                        );
+                        
+                        const springData = allData.find(d => 
+                            d.Department === currentDept && 
+                            d.Metric === 'CHP' && 
+                            d['Year/Term'] === springTerm
+                        );
+                        
+                        const cell = document.createElement('td');
+                        
+                        if (fallData && springData) {
+                            const fallValue = parseValue(fallData.Value);
+                            const springValue = parseValue(springData.Value);
+                            
+                            if (fallValue !== null && springValue !== null) {
+                                const total = fallValue + springValue;
+                                cell.textContent = formatValue(metric, total);
+                                hasCHPData = true;
+                            } else {
+                                cell.textContent = '-';
+                            }
+                        } else {
+                            cell.textContent = '-';
+                        }
+                        
+                        row.appendChild(cell);
+                    });
+                    
+                    // Only add the CHP row if there's at least one year with data
+                    if (hasCHPData) {
+                        tbody.appendChild(row);
+                    }
+                    return;
+                }
+                
                 // Check if this metric has any year-based data
                 const hasYearData = years.some(year => {
                     return allData.some(d => 
@@ -1066,4 +1121,3 @@
     </script>
 </body>
 </html>
-
