@@ -793,11 +793,22 @@
             
             // Add CHP to metrics list if not present (it only exists as Fall/Spring in CSV, not academic years)
             // Check if this department has any Fall or Spring CHP data
-            const hasCHPData = allData.some(d => 
-                d.Department === currentDept && 
-                d.Metric === 'CHP' && 
-                (d['Year/Term'].includes('Fall') || d['Year/Term'].includes('Spring'))
-            );
+            let hasCHPData;
+            if (currentDept === 'CLAS') {
+                // For CLAS, check if ANY department has Fall/Spring CHP data (we'll sum them)
+                hasCHPData = allData.some(d => 
+                    d.Department !== 'CLAS' && 
+                    d.Metric === 'CHP' && 
+                    (d['Year/Term'].includes('Fall') || d['Year/Term'].includes('Spring'))
+                );
+            } else {
+                // For individual departments, check if THIS department has Fall/Spring CHP data
+                hasCHPData = allData.some(d => 
+                    d.Department === currentDept && 
+                    d.Metric === 'CHP' && 
+                    (d['Year/Term'].includes('Fall') || d['Year/Term'].includes('Spring'))
+                );
+            }
             
             if (hasCHPData && !metrics.includes('CHP')) {
                 metrics.push('CHP');
