@@ -986,6 +986,12 @@
         }
         
         function updateTrendChart(metric) {
+            // Special handling for CHP - aggregate by academic year
+            if (metric === 'CHP') {
+                updateCHPTrendChart();
+                return;
+            }
+            
             // Get all data points for this department and metric
             const chartData = allData
                 .filter(d => d.Department === currentDept && d.Metric === metric)
@@ -1111,6 +1117,145 @@
                             ticks: {
                                 callback: function(value) {
                                     return formatValue(metric, value);
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        function updateCHPTrendChart() {
+            // Get all unique Fall years for CHP
+            const fallYears = [...new Set(allData
+                .filter(d => d.Department === currentDept && d.Metric === 'CHP' && d['Year/Term'] && d['Year/Term'].includes('Fall'))
+                .map(d => {
+                    const yearMatch = d['Year/Term'].match(/\d{4}/);
+                    return yearMatch ? parseInt(yearMatch[0]) : null;
+                })
+                .filter(y => y !== null)
+            )].sort();
+            
+            // Calculate academic year totals
+            const chartData = [];
+            fallYears.forEach(fallYear => {
+                const springYear = fallYear + 1;
+                const fallTerm = `Fall ${fallYear}`;
+                const springTerm = `Spring ${springYear}`;
+                
+                const fallData = allData.find(d => 
+                    d.Department === currentDept && 
+                    d.Metric === 'CHP' && 
+                    d['Year/Term'] === fallTerm
+                );
+                
+                const springData = allData.find(d => 
+                    d.Department === currentDept && 
+                    d.Metric === 'CHP' && 
+                    d['Year/Term'] === springTerm
+                );
+                
+                if (fallData && springData) {
+                    const fallValue = parseValue(fallData.Value);
+                    const springValue = parseValue(springData.Value);
+                    
+                    if (fallValue !== null && springValue !== null) {
+                        chartData.push({
+                            period: `${fallYear}-${springYear}`,
+                            value: fallValue + springValue
+                        });
+                    }
+                }
+            });
+            
+            if (chartData.length === 0) {
+                if (trendChart) {
+                    trendChart.destroy();
+                    trendChart = null;
+                }
+                return;
+            }
+            
+            const ctx = document.getElementById('trendChart');
+            
+            if (trendChart) {
+                trendChart.destroy();
+            }
+            
+            // Calculate trend line
+            const trendLineValues = calculateLinearRegression(chartData);
+            
+            // Prepare datasets
+            const datasets = [{
+                label: 'Credit Hours Produced',
+                data: chartData.map(d => d.value),
+                borderColor: '#00447c',
+                backgroundColor: 'rgba(0, 68, 124, 0.1)',
+                tension: 0.3,
+                fill: true,
+                pointRadius: 4,
+                pointHoverRadius: 6,
+                order: 2
+            }];
+            
+            // Add trend line if we have enough data points
+            if (trendLineValues && chartData.length >= 2) {
+                datasets.push({
+                    label: 'Trend Line',
+                    data: trendLineValues,
+                    borderColor: '#d11242',
+                    backgroundColor: 'transparent',
+                    borderDash: [5, 5],
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    pointHoverRadius: 0,
+                    fill: false,
+                    tension: 0,
+                    order: 1
+                });
+            }
+            
+            trendChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: chartData.map(d => d.period),
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        },
+                        title: {
+                            display: true,
+                            text: `Credit Hours Produced - ${currentDept === 'CLAS' ? 'All Departments' : currentDept}`,
+                            font: {
+                                size: 16,
+                                weight: 'bold'
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    label += Math.round(context.parsed.y).toLocaleString();
+                                    return label;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: false,
+                            ticks: {
+                                callback: function(value) {
+                                    return Math.round(value).toLocaleString();
                                 }
                             }
                         }
