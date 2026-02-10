@@ -791,6 +791,15 @@
             metrics.forEach(metric => {
                 // Special handling for CHP - calculate from Fall + Spring terms
                 if (metric === 'CHP') {
+                    // Check if there are any Fall or Spring CHP values for this department
+                    const hasAnyCHPData = allData.some(d => 
+                        d.Department === currentDept && 
+                        d.Metric === 'CHP' && 
+                        (d['Year/Term'].includes('Fall') || d['Year/Term'].includes('Spring'))
+                    );
+                    
+                    if (!hasAnyCHPData) return; // Skip if no term-based CHP data
+                    
                     const row = document.createElement('tr');
                     const nameCell = document.createElement('td');
                     nameCell.className = 'metric-name';
@@ -804,7 +813,7 @@
                         const fallTerm = `Fall ${fallYear}`;
                         const springTerm = `Spring ${springYear}`;
                         
-                        // Get Fall and Spring CHP values
+                        // Get Fall and Spring CHP values for current department
                         const fallData = allData.find(d => 
                             d.Department === currentDept && 
                             d.Metric === 'CHP' && 
