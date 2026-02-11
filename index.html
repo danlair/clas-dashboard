@@ -253,7 +253,7 @@
         };
         
         const metricLabels = {
-            'CHP': 'Credit Hours Produced',
+            'CHP': 'CHP',
             'FTEs': 'FTEs',
             'Seats_Filled': 'Seats Filled',
             'Majors': 'Total Majors',
@@ -493,11 +493,20 @@
             
             // Function to populate metrics based on current department
             function updateChartMetricOptions() {
+                console.log('=== updateChartMetricOptions called ===');
+                console.log('currentDept:', currentDept);
+                
                 // Get metrics that have data for current department
-                const availableMetrics = [...new Set(allData
+                let availableMetrics = [...new Set(allData
                     .filter(d => d.Department === currentDept)
                     .map(d => d.Metric)
                 )].sort();
+                
+                // For CLAS, add CHP even though it's not in the CSV (we calculate it from departments)
+                if (currentDept === 'CLAS' && !availableMetrics.includes('CHP')) {
+                    availableMetrics.push('CHP');
+                    availableMetrics.sort();
+                }
                 
                 const currentSelection = chartMetricSelect.value;
                 chartMetricSelect.innerHTML = '<option value="">Choose a metric...</option>';
@@ -722,7 +731,7 @@
             }
             
             card.innerHTML = `
-                <div class="kpi-label">Credit Hours Produced (${mostRecentAcademicYear})</div>
+                <div class="kpi-label">CHP (${mostRecentAcademicYear})</div>
                 <div class="kpi-value">${currentSum !== null ? Math.round(currentSum).toLocaleString() : '-'}</div>
                 <div class="kpi-change ${changeClass}">${comparisonText}</div>
             `;
@@ -765,6 +774,10 @@
         }
         
         function updateYearTable() {
+            console.log('=== updateYearTable called ===');
+            console.log('currentDept:', currentDept);
+            console.log('currentDept === "CLAS":', currentDept === 'CLAS');
+            
             // Get all academic years (YYYY-YYYY format) and sort in reverse
             const years = [...new Set(allData
                 .filter(d => d.Department === currentDept)
@@ -780,10 +793,40 @@
                 headerRow.appendChild(th);
             });
             
-            const metrics = [...new Set(allData
+            let metrics = [...new Set(allData
                 .filter(d => d.Department === currentDept)
                 .map(d => d.Metric)
             )].sort();
+            
+            // Add CHP to metrics list if not present (it only exists as Fall/Spring in CSV, not academic years)
+            // Check if this department has any Fall or Spring CHP data
+            let hasCHPData;
+            if (currentDept === 'CLAS') {
+                // For CLAS, check if ANY department has Fall/Spring CHP data (we'll sum them)
+                hasCHPData = allData.some(d => 
+                    d.Department !== 'CLAS' && 
+                    d.Metric === 'CHP' && 
+                    (d['Year/Term'].includes('Fall') || d['Year/Term'].includes('Spring'))
+                );
+                console.log('CLAS - hasCHPData:', hasCHPData);
+                console.log('CLAS - years array:', years);
+                console.log('CLAS - metrics before adding CHP:', metrics);
+            } else {
+                // For individual departments, check if THIS department has Fall/Spring CHP data
+                hasCHPData = allData.some(d => 
+                    d.Department === currentDept && 
+                    d.Metric === 'CHP' && 
+                    (d['Year/Term'].includes('Fall') || d['Year/Term'].includes('Spring'))
+                );
+            }
+            
+            if (hasCHPData && !metrics.includes('CHP')) {
+                metrics.push('CHP');
+                metrics.sort();
+                if (currentDept === 'CLAS') {
+                    console.log('CLAS - Added CHP to metrics. New metrics:', metrics);
+                }
+            }
             
             const tbody = document.getElementById('tableBodyYear');
             tbody.innerHTML = '';
@@ -791,55 +834,71 @@
             metrics.forEach(metric => {
                 // Special handling for CHP - calculate from Fall + Spring terms
                 if (metric === 'CHP') {
+                    console.log('Processing CHP metric for department:', currentDept);
                     const row = document.createElement('tr');
                     const nameCell = document.createElement('td');
                     nameCell.className = 'metric-name';
                     nameCell.textContent = metricLabels[metric] || metric;
                     row.appendChild(nameCell);
                     
-                    let hasCHPData = false;
+                    let hasYearCHPData = false;
                     
                     years.forEach(year => {
                         const [fallYear, springYear] = year.split('-').map(y => parseInt(y));
                         const fallTerm = `Fall ${fallYear}`;
                         const springTerm = `Spring ${springYear}`;
                         
-                        // Get Fall and Spring CHP values
-                        const fallData = allData.find(d => 
-                            d.Department === currentDept && 
-                            d.Metric === 'CHP' && 
-                            d['Year/Term'] === fallTerm
-                        );
-                        
-                        const springData = allData.find(d => 
-                            d.Department === currentDept && 
-                            d.Metric === 'CHP' && 
-                            d['Year/Term'] === springTerm
-                        );
-                        
                         const cell = document.createElement('td');
                         
-                        if (fallData && springData) {
-                            const fallValue = parseValue(fallData.Value);
-                            const springValue = parseValue(springData.Value);
-                            
-                            if (fallValue !== null && springValue !== null) {
-                                const total = fallValue + springValue;
+                        if (currentDept === 'CLAS') {
+                            // For CLAS, sum all departments' CHP for this academic year
+                            const total = calculateAcademicYearCHP(fallYear, springYear);
+                            console.log(`CLAS - ${year}: CHP total =`, total);
+                            if (total > 0) {
                                 cell.textContent = formatValue(metric, total);
-                                hasCHPData = true;
+                                hasYearCHPData = true;
                             } else {
                                 cell.textContent = '-';
                             }
                         } else {
-                            cell.textContent = '-';
+                            // For individual departments, get their Fall and Spring values
+                            const fallData = allData.find(d => 
+                                d.Department === currentDept && 
+                                d.Metric === 'CHP' && 
+                                d['Year/Term'] === fallTerm
+                            );
+                            
+                            const springData = allData.find(d => 
+                                d.Department === currentDept && 
+                                d.Metric === 'CHP' && 
+                                d['Year/Term'] === springTerm
+                            );
+                            
+                            if (fallData && springData) {
+                                const fallValue = parseValue(fallData.Value);
+                                const springValue = parseValue(springData.Value);
+                                
+                                if (fallValue !== null && springValue !== null) {
+                                    const total = fallValue + springValue;
+                                    cell.textContent = formatValue(metric, total);
+                                    hasYearCHPData = true;
+                                } else {
+                                    cell.textContent = '-';
+                                }
+                            } else {
+                                cell.textContent = '-';
+                            }
                         }
                         
                         row.appendChild(cell);
                     });
                     
                     // Only add the CHP row if there's at least one year with data
-                    if (hasCHPData) {
+                    if (hasYearCHPData) {
+                        console.log('Adding CHP row to table for', currentDept);
                         tbody.appendChild(row);
+                    } else {
+                        console.log('NOT adding CHP row - no data for', currentDept);
                     }
                     return;
                 }
@@ -1126,9 +1185,12 @@
         }
         
         function updateCHPTrendChart() {
+            // For CLAS, we need to calculate from all departments
+            // For individual departments, use their specific data
+            
             // Get all unique Fall years for CHP
             const fallYears = [...new Set(allData
-                .filter(d => d.Department === currentDept && d.Metric === 'CHP' && d['Year/Term'] && d['Year/Term'].includes('Fall'))
+                .filter(d => d.Metric === 'CHP' && d['Year/Term'] && d['Year/Term'].includes('Fall'))
                 .map(d => {
                     const yearMatch = d['Year/Term'].match(/\d{4}/);
                     return yearMatch ? parseInt(yearMatch[0]) : null;
@@ -1140,30 +1202,43 @@
             const chartData = [];
             fallYears.forEach(fallYear => {
                 const springYear = fallYear + 1;
-                const fallTerm = `Fall ${fallYear}`;
-                const springTerm = `Spring ${springYear}`;
                 
-                const fallData = allData.find(d => 
-                    d.Department === currentDept && 
-                    d.Metric === 'CHP' && 
-                    d['Year/Term'] === fallTerm
-                );
-                
-                const springData = allData.find(d => 
-                    d.Department === currentDept && 
-                    d.Metric === 'CHP' && 
-                    d['Year/Term'] === springTerm
-                );
-                
-                if (fallData && springData) {
-                    const fallValue = parseValue(fallData.Value);
-                    const springValue = parseValue(springData.Value);
-                    
-                    if (fallValue !== null && springValue !== null) {
+                if (currentDept === 'CLAS') {
+                    // For CLAS, sum all departments
+                    const total = calculateAcademicYearCHP(fallYear, springYear);
+                    if (total > 0) {
                         chartData.push({
                             period: `${fallYear}-${springYear}`,
-                            value: fallValue + springValue
+                            value: total
                         });
+                    }
+                } else {
+                    // For individual departments, use their specific data
+                    const fallTerm = `Fall ${fallYear}`;
+                    const springTerm = `Spring ${springYear}`;
+                    
+                    const fallData = allData.find(d => 
+                        d.Department === currentDept && 
+                        d.Metric === 'CHP' && 
+                        d['Year/Term'] === fallTerm
+                    );
+                    
+                    const springData = allData.find(d => 
+                        d.Department === currentDept && 
+                        d.Metric === 'CHP' && 
+                        d['Year/Term'] === springTerm
+                    );
+                    
+                    if (fallData && springData) {
+                        const fallValue = parseValue(fallData.Value);
+                        const springValue = parseValue(springData.Value);
+                        
+                        if (fallValue !== null && springValue !== null) {
+                            chartData.push({
+                                period: `${fallYear}-${springYear}`,
+                                value: fallValue + springValue
+                            });
+                        }
                     }
                 }
             });
@@ -1187,7 +1262,7 @@
             
             // Prepare datasets
             const datasets = [{
-                label: 'Credit Hours Produced',
+                label: 'CHP',
                 data: chartData.map(d => d.value),
                 borderColor: '#00447c',
                 backgroundColor: 'rgba(0, 68, 124, 0.1)',
@@ -1231,7 +1306,7 @@
                         },
                         title: {
                             display: true,
-                            text: `Credit Hours Produced - ${currentDept === 'CLAS' ? 'All Departments' : currentDept}`,
+                            text: `CHP - ${currentDept === 'CLAS' ? 'All Departments' : currentDept}`,
                             font: {
                                 size: 16,
                                 weight: 'bold'
