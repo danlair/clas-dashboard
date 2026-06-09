@@ -599,8 +599,18 @@
                     let changeClass = 'neutral';
                     let arrow = '';
                     let comparisonText = '';
-                    
-                    if (change !== null && pv !== null) {
+
+                    if (metric === 'Graduates') {
+                        // Show a data caveat instead of a change figure
+                        changeClass = 'neutral';
+                        comparisonText = '*Does not yet include Summer 2024 graduates';
+                    } else if (metric === 'Profit_Loss' && cv !== null && pv !== null) {
+                        // Show raw change (e.g. +$0.23) instead of percent change
+                        const rawChange = cv - pv;
+                        changeClass = rawChange > 0 ? 'positive' : rawChange < 0 ? 'negative' : 'neutral';
+                        const sign = rawChange >= 0 ? '+' : '-';
+                        comparisonText = `${sign}$${Math.abs(rawChange).toFixed(2)} vs ${previous['Year/Term']}`;
+                    } else if (change !== null && pv !== null) {
                         // DFWI: lower is better (down = green, up = red)
                         // All other metrics: higher is better (up = green, down = red)
                         if (metric === 'DFWI') {
@@ -1043,7 +1053,45 @@
             // Calculate trend line values for each point
             return dataPoints.map((point, index) => slope * index + intercept);
         }
-        
+
+        // Count metrics use a zero baseline (#2); everything else gets a
+        // magnitude-relative minimum span so flat lines don't get exaggerated (#1).
+        const COUNT_METRICS = ['Graduates', 'CHP', 'FTEs', 'Seats_Filled', 'Majors'];
+
+        function getYAxisRange(metric, values) {
+            const vals = values.filter(v => v !== null && v !== undefined && !isNaN(v));
+            if (vals.length === 0) return {};
+
+            const dataMin = Math.min(...vals);
+            const dataMax = Math.max(...vals);
+            const PADDING = 0.10;          // 10% breathing room around the data
+            const MIN_SPAN_FRACTION = 0.15; // axis never tighter than 15% of magnitude
+
+            // #2: count metrics anchor at zero
+            if (COUNT_METRICS.includes(metric)) {
+                const top = dataMax > 0 ? dataMax * (1 + PADDING) : 1;
+                return { min: 0, max: top };
+            }
+
+            // #1: enforce a minimum span scaled to the data's own magnitude
+            const mid = (dataMin + dataMax) / 2;
+            const dataRange = dataMax - dataMin;
+            const magnitude = Math.max(Math.abs(dataMin), Math.abs(dataMax));
+            const minSpan = magnitude * MIN_SPAN_FRACTION;
+            let span = Math.max(dataRange * (1 + PADDING), minSpan);
+            if (span === 0) span = (magnitude * MIN_SPAN_FRACTION) || 1;
+
+            let min = mid - span / 2;
+            let max = mid + span / 2;
+
+            // Only Profit/Loss can legitimately go negative; keep others off the floor
+            if (metric !== 'Profit_Loss' && min < 0) {
+                max += -min;
+                min = 0;
+            }
+            return { min: min, max: max };
+        }
+
         function updateTrendChart(metric) {
             // Special handling for CHP - aggregate by academic year
             if (metric === 'CHP') {
@@ -1099,7 +1147,10 @@
             
             // Calculate trend line
             const trendLineValues = calculateLinearRegression(chartData);
-            
+
+            // Compute a sensible y-axis range (#1 + #2)
+            const yRange = getYAxisRange(metric, chartData.map(d => d.value).concat(trendLineValues || []));
+
             // Prepare datasets
             const datasets = [{
                 label: metricLabels[metric] || metric,
@@ -1173,6 +1224,8 @@
                     scales: {
                         y: {
                             beginAtZero: false,
+                            min: yRange.min,
+                            max: yRange.max,
                             ticks: {
                                 callback: function(value) {
                                     return formatValue(metric, value);
@@ -1259,7 +1312,10 @@
             
             // Calculate trend line
             const trendLineValues = calculateLinearRegression(chartData);
-            
+
+            // CHP is a count metric -> zero-baseline range (#2)
+            const yRange = getYAxisRange('CHP', chartData.map(d => d.value).concat(trendLineValues || []));
+
             // Prepare datasets
             const datasets = [{
                 label: 'CHP',
@@ -1328,6 +1384,8 @@
                     scales: {
                         y: {
                             beginAtZero: false,
+                            min: yRange.min,
+                            max: yRange.max,
                             ticks: {
                                 callback: function(value) {
                                     return Math.round(value).toLocaleString();
