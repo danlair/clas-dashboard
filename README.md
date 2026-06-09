@@ -1,1 +1,2 @@
-# cals-dashboard
+# clas
+-dashboard
