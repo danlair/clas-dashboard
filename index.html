@@ -573,10 +573,10 @@
                 kpiContainer.className = 'kpi-container';
                 
                 metricGroups[groupName].forEach(metric => {
-                    // Special handling for CLAS (All Departments): Show CHP_AcademicYear instead of Seats_Filled
+                    // Special handling for CLAS (All Departments): Show CHP for the latest term instead of Seats_Filled
                     if (currentDept === 'CLAS' && metric === 'Seats_Filled') {
-                        // Calculate CHP for academic year (Fall + Spring)
-                        const chpCard = createAcademicYearCHPCard();
+                        // Sum the departments' CHP for the most recent term (e.g. Fall 2026)
+                        const chpCard = createLatestTermCHPCard();
                         if (chpCard) {
                             kpiContainer.appendChild(chpCard);
                         }
@@ -654,94 +654,71 @@
             });
         }
         
-        function createAcademicYearCHPCard() {
-            // Get all academic years that have BOTH Fall and Spring CHP data
-            const academicYearsWithData = [];
-            
-            // Find all unique Fall years
-            const fallYears = [...new Set(allData
-                .filter(d => d.Metric === 'CHP' && d['Year/Term'] && d['Year/Term'].includes('Fall'))
-                .map(d => {
-                    const yearMatch = d['Year/Term'].match(/\d{4}/);
-                    return yearMatch ? parseInt(yearMatch[0]) : null;
-                })
-                .filter(y => y !== null)
-            )];
-            
-            // Check each Fall year to see if corresponding Spring year exists
-            fallYears.forEach(fallYear => {
-                const springYear = fallYear + 1;
-                const fallTerm = `Fall ${fallYear}`;
-                const springTerm = `Spring ${springYear}`;
-                
-                // Check if both Fall and Spring have data (excluding CLAS aggregate)
-                const hasFallData = allData.some(d => 
-                    d.Metric === 'CHP' && 
-                    d['Year/Term'] === fallTerm &&
-                    d.Department !== 'CLAS' &&
-                    d.Value !== null && 
-                    d.Value !== undefined && 
-                    d.Value !== ''
+        function createLatestTermCHPCard() {
+            // CLAS has no CHP rows of its own, so this card totals the department rows
+            // for the most recent term with CHP data (e.g. Fall 2026) and compares it
+            // with the same term one year earlier (e.g. Fall 2025).
+            const hasValue = d => d.Value !== null && d.Value !== undefined && d.Value !== '';
+            const isTerm = t => t && (t.includes('Fall') || t.includes('Spring')) && /\d{4}/.test(t);
+
+            // Chronological sort key: Fall 2025 < Spring 2026 < Fall 2026
+            const termKey = term => {
+                const year = parseInt(term.match(/\d{4}/)[0]);
+                return term.includes('Fall') ? year * 10 + 5 : year * 10;
+            };
+
+            // Sum all departments' CHP for one term (null if no department has data)
+            const sumTerm = term => {
+                const rows = allData.filter(d =>
+                    d.Metric === 'CHP' &&
+                    d['Year/Term'] === term &&
+                    d.Department !== 'CLAS' && // Exclude any aggregate CLAS row to avoid double-counting
+                    hasValue(d)
                 );
-                
-                const hasSpringData = allData.some(d => 
-                    d.Metric === 'CHP' && 
-                    d['Year/Term'] === springTerm &&
-                    d.Department !== 'CLAS' &&
-                    d.Value !== null && 
-                    d.Value !== undefined && 
-                    d.Value !== ''
-                );
-                
-                // Only include academic years with BOTH Fall and Spring data
-                if (hasFallData && hasSpringData) {
-                    academicYearsWithData.push(`${fallYear}-${springYear}`);
-                }
-            });
-            
-            if (academicYearsWithData.length === 0) return null;
-            
-            // Sort in reverse chronological order
-            academicYearsWithData.sort().reverse();
-            
-            const mostRecentAcademicYear = academicYearsWithData[0];
-            const previousAcademicYear = academicYearsWithData.length > 1 ? academicYearsWithData[1] : null;
-            
-            // Calculate sum for most recent academic year
-            const [fallYear, springYear] = mostRecentAcademicYear.split('-').map(y => parseInt(y));
-            const currentSum = calculateAcademicYearCHP(fallYear, springYear);
-            
-            let previousSum = null;
-            if (previousAcademicYear) {
-                const [prevFallYear, prevSpringYear] = previousAcademicYear.split('-').map(y => parseInt(y));
-                previousSum = calculateAcademicYearCHP(prevFallYear, prevSpringYear);
-            }
-            
-            const change = (currentSum !== null && previousSum !== null) 
-                ? ((currentSum - previousSum) / previousSum * 100) 
+                if (rows.length === 0) return null;
+                return rows.reduce((sum, d) => sum + (parseValue(d.Value) || 0), 0);
+            };
+
+            const terms = [...new Set(allData
+                .filter(d => d.Metric === 'CHP' && d.Department !== 'CLAS' && isTerm(d['Year/Term']) && hasValue(d))
+                .map(d => d['Year/Term'])
+            )].sort((a, b) => termKey(b) - termKey(a));
+
+            if (terms.length === 0) return null;
+
+            const currentTerm = terms[0];
+            const currentSum = sumTerm(currentTerm);
+
+            // Same term, one year earlier
+            const season = currentTerm.includes('Fall') ? 'Fall' : 'Spring';
+            const previousTerm = `${season} ${parseInt(currentTerm.match(/\d{4}/)[0]) - 1}`;
+            const previousSum = sumTerm(previousTerm);
+
+            const change = (currentSum !== null && previousSum)
+                ? ((currentSum - previousSum) / previousSum * 100)
                 : null;
-            
+
             const card = document.createElement('div');
             card.className = 'kpi-card';
-            
+
             let changeClass = 'neutral';
             let arrow = '';
             let comparisonText = '';
-            
+
             if (change !== null) {
                 changeClass = change > 0 ? 'positive' : change < 0 ? 'negative' : 'neutral';
                 arrow = change > 0 ? '↑' : change < 0 ? '↓' : '→';
-                comparisonText = `${arrow} ${Math.abs(change).toFixed(1)}% vs ${previousAcademicYear}`;
+                comparisonText = `${arrow} ${Math.abs(change).toFixed(1)}% vs ${previousTerm}`;
             } else {
                 comparisonText = 'No prior year data';
             }
-            
+
             card.innerHTML = `
-                <div class="kpi-label">CHP (${mostRecentAcademicYear})</div>
+                <div class="kpi-label">CHP (${currentTerm})</div>
                 <div class="kpi-value">${currentSum !== null ? Math.round(currentSum).toLocaleString() : '-'}</div>
                 <div class="kpi-change ${changeClass}">${comparisonText}</div>
             `;
-            
+
             return card;
         }
         
@@ -767,6 +744,10 @@
                 d.Value !== undefined && 
                 d.Value !== ''
             );
+            
+            // Only report an academic-year total once BOTH terms have data.
+            // A Fall-only sum would otherwise show up as if it were the full year.
+            if (fallData.length === 0 || springData.length === 0) return null;
             
             const fallSum = fallData.reduce((sum, d) => sum + parseFloat(d.Value), 0);
             const springSum = springData.reduce((sum, d) => sum + parseFloat(d.Value), 0);
